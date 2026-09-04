@@ -8,7 +8,7 @@ import os
 import warnings
 warnings.filterwarnings('ignore')
 
-st.set_page_config(page_title="三合一量化指标 + 统计模拟", layout="wide")
+st.set_page_config(page_title="模拟分析", layout="wide")
 
 # =========================================================
 # 🔐 登录功能（兼容本地和云端）
@@ -58,7 +58,7 @@ if not auth["authenticated"]:
     st.stop()
 # =========================================================
 
-st.title("📈 三合一量化指标 + 统计模拟")
+st.title("📈 模拟分析")
 st.caption("数据源：zzshare · 技术信号 + 四张网 + 板块轮动 + 统计模拟（可调参数）")
 
 # =========================================================
@@ -401,7 +401,7 @@ def calc_sector_rotation(stock_sector, top1, top1_ch, top2, top2_ch, top3, top3_
             result['market_style'] = "板块轮动无明显主线"
     else:
         result['market_style'] = "板块数据未填写"
-    return result   # 这里修复：返回 result
+    return result
 
 # =========================================================
 # 统计模拟函数（三种方法，参数化，独立获取数据）
@@ -456,119 +456,123 @@ def run_simulations_for_code(code, hist_len, forecast_days, n_sim=5000):
     return final_simple, final_block, final_gbm, last_price, df
 
 # =========================================================
-# 统计模拟显示函数
+# 统计模拟显示函数（整体折叠，默认展开）
 # =========================================================
 def display_statistical_simulation(code, hist_len, forecast_days, n_sim):
-    st.subheader(f"📈 统计模拟预测（未来 {forecast_days} 天，基于最近 {hist_len} 天历史）")
+    """显示统计模拟结果（整体可折叠，默认展开）"""
+    with st.expander(f"📈 统计模拟预测（未来 {forecast_days} 天，基于最近 {hist_len} 天历史）", expanded=True):
+        with st.spinner(f"正在获取 {code} 的历史数据并运行 {n_sim} 次模拟..."):
+            final_simple, final_block, final_gbm, current_price, df_hist = run_simulations_for_code(code, hist_len, forecast_days, n_sim)
 
-    with st.spinner(f"正在获取 {code} 的历史数据并运行 {n_sim} 次模拟..."):
-        final_simple, final_block, final_gbm, current_price, df_hist = run_simulations_for_code(code, hist_len, forecast_days, n_sim)
+        if final_simple is None:
+            st.error("❌ 数据不足，无法模拟")
+            return
 
-    if final_simple is None:
-        st.error("❌ 数据不足，无法模拟")
-        return
+        actual_len = len(df_hist)
+        st.write(f"实际使用历史数据：{actual_len} 天")
 
-    actual_len = len(df_hist)
-    st.write(f"实际使用历史数据：{actual_len} 天")
+        def calc_full_stats(arr):
+            mean = np.mean(arr)
+            median = np.median(arr)
+            p5 = np.percentile(arr, 5)
+            p25 = np.percentile(arr, 25)
+            p75 = np.percentile(arr, 75)
+            p95 = np.percentile(arr, 95)
+            p1 = np.percentile(arr, 1)
+            p99 = np.percentile(arr, 99)
+            win_rate = np.mean(arr > current_price)
+            gains = arr[arr > current_price] - current_price
+            losses = current_price - arr[arr < current_price]
+            avg_gain = np.mean(gains) if len(gains) > 0 else 0
+            avg_loss = np.mean(losses) if len(losses) > 0 else 0
+            profit_loss_ratio = avg_gain / avg_loss if avg_loss > 0 else np.inf
+            returns_sim = (arr - current_price) / current_price
+            sharpe = np.mean(returns_sim) / np.std(returns_sim) * np.sqrt(252) if np.std(returns_sim) > 0 else 0
+            max_loss_pct = (current_price - p5) / current_price * 100
+            return {
+                'mean': mean,
+                'median': median,
+                'p25': p25,
+                'p75': p75,
+                'p5': p5,
+                'p95': p95,
+                'p1': p1,
+                'p99': p99,
+                'win_rate': win_rate,
+                'profit_loss_ratio': profit_loss_ratio,
+                'sharpe': sharpe,
+                'max_loss_pct': max_loss_pct
+            }
 
-    def calc_full_stats(arr):
-        mean = np.mean(arr)
-        median = np.median(arr)
-        p5 = np.percentile(arr, 5)
-        p25 = np.percentile(arr, 25)
-        p75 = np.percentile(arr, 75)
-        p95 = np.percentile(arr, 95)
-        p1 = np.percentile(arr, 1)
-        p99 = np.percentile(arr, 99)
-        win_rate = np.mean(arr > current_price)
-        gains = arr[arr > current_price] - current_price
-        losses = current_price - arr[arr < current_price]
-        avg_gain = np.mean(gains) if len(gains) > 0 else 0
-        avg_loss = np.mean(losses) if len(losses) > 0 else 0
-        profit_loss_ratio = avg_gain / avg_loss if avg_loss > 0 else np.inf
-        returns_sim = (arr - current_price) / current_price
-        sharpe = np.mean(returns_sim) / np.std(returns_sim) * np.sqrt(252) if np.std(returns_sim) > 0 else 0
-        max_loss_pct = (current_price - p5) / current_price * 100
-        return {
-            'mean': mean,
-            'median': median,
-            'p25': p25,
-            'p75': p75,
-            'p5': p5,
-            'p95': p95,
-            'p1': p1,
-            'p99': p99,
-            'win_rate': win_rate,
-            'profit_loss_ratio': profit_loss_ratio,
-            'sharpe': sharpe,
-            'max_loss_pct': max_loss_pct
-        }
+        stats_simple = calc_full_stats(final_simple)
+        stats_block = calc_full_stats(final_block)
+        stats_gbm = calc_full_stats(final_gbm)
 
-    stats_simple = calc_full_stats(final_simple)
-    stats_block = calc_full_stats(final_block)
-    stats_gbm = calc_full_stats(final_gbm)
+        # ---- 核心结论 ----
+        st.write("**📌 核心结论（块状抽样）**")
+        st.write(f"- 当前价格：**{current_price:.2f}**")
+        st.write(f"- 中位数（最可能价格）：**{stats_block['median']:.2f}** → 当前价格{'低于' if current_price < stats_block['median'] else '高于'}中位数，可能{'偏低估' if current_price < stats_block['median'] else '偏高估'}")
+        st.write(f"- 5% 底线（极端风险）：**{stats_block['p5']:.2f}** → 最大潜在跌幅约 {max(0, (1 - stats_block['p5']/current_price)*100):.1f}%")
+        st.write(f"- 胜率（模拟终值高于当前价）：**{stats_block['win_rate']:.1%}**")
+        st.write(f"- 盈亏比：**{stats_block['profit_loss_ratio']:.2f}** → {'优秀（>2）' if stats_block['profit_loss_ratio'] > 2 else '尚可（1~2）' if stats_block['profit_loss_ratio'] > 1 else '偏低（<1）'}")
+        st.write(f"- 夏普比率（年化）：**{stats_block['sharpe']:.2f}** → {'优秀（>1）' if stats_block['sharpe'] > 1 else '尚可（0.5~1）' if stats_block['sharpe'] > 0.5 else '偏低（<0.5）'}")
 
-    st.write("**📊 详细指标对比表**")
-    df_stats = pd.DataFrame({
-        '方法': ['简单随机抽样', '块状抽样（推荐）', '几何布朗运动'],
-        '平均预期': [f"{stats_simple['mean']:.2f}", f"{stats_block['mean']:.2f}", f"{stats_gbm['mean']:.2f}"],
-        '中位数': [f"{stats_simple['median']:.2f}", f"{stats_block['median']:.2f}", f"{stats_gbm['median']:.2f}"],
-        '25%分位': [f"{stats_simple['p25']:.2f}", f"{stats_block['p25']:.2f}", f"{stats_gbm['p25']:.2f}"],
-        '75%分位': [f"{stats_simple['p75']:.2f}", f"{stats_block['p75']:.2f}", f"{stats_gbm['p75']:.2f}"],
-        '5%底线': [f"{stats_simple['p5']:.2f}", f"{stats_block['p5']:.2f}", f"{stats_gbm['p5']:.2f}"],
-        '95%上限': [f"{stats_simple['p95']:.2f}", f"{stats_block['p95']:.2f}", f"{stats_gbm['p95']:.2f}"],
-        '胜率（>当前价）': [f"{stats_simple['win_rate']:.1%}", f"{stats_block['win_rate']:.1%}", f"{stats_gbm['win_rate']:.1%}"],
-        '盈亏比': [f"{stats_simple['profit_loss_ratio']:.2f}" if stats_simple['profit_loss_ratio'] != np.inf else "∞",
-                   f"{stats_block['profit_loss_ratio']:.2f}" if stats_block['profit_loss_ratio'] != np.inf else "∞",
-                   f"{stats_gbm['profit_loss_ratio']:.2f}" if stats_gbm['profit_loss_ratio'] != np.inf else "∞"],
-        '夏普比率（年化）': [f"{stats_simple['sharpe']:.2f}", f"{stats_block['sharpe']:.2f}", f"{stats_gbm['sharpe']:.2f}"],
-        '5%底线亏损幅度': [f"{stats_simple['max_loss_pct']:.1f}%",
-                         f"{stats_block['max_loss_pct']:.1f}%",
-                         f"{stats_gbm['max_loss_pct']:.1f}%"]
-    })
-    st.table(df_stats)
+        if stats_block['mean'] > stats_block['median']:
+            st.info("💡 分布右偏（平均值>中位数）：存在少数暴涨拉高平均值的可能性，有“彩票式”上涨潜力。")
+        elif stats_block['mean'] < stats_block['median']:
+            st.warning("⚠️ 分布左偏（平均值<中位数）：少数暴跌拉低平均值，极端下跌风险不容忽视。")
+        else:
+            st.info("💡 分布对称，上下风险均衡。")
 
-    st.write("**📌 如何解读：**")
-    st.write(f"- 当前价格：**{current_price:.2f}**")
-    st.write(f"- 块状抽样中位数（最可能的价格）：**{stats_block['median']:.2f}** → 当前价格{'低于' if current_price < stats_block['median'] else '高于'}中位数，可能{'偏低估' if current_price < stats_block['median'] else '偏高估'}")
-    st.write(f"- 块状抽样 5% 底线（极端风险）：**{stats_block['p5']:.2f}** → 最大潜在跌幅约 {max(0, (1 - stats_block['p5']/current_price)*100):.1f}%")
-    st.write(f"- 块状抽样 25%～75% 价格区间：**{stats_block['p25']:.2f} ～ {stats_block['p75']:.2f}** （50%概率落在此区间）")
-    st.write(f"- 胜率（模拟终值高于当前价的概率）：**{stats_block['win_rate']:.1%}**")
-    st.write(f"- 盈亏比（平均盈利/平均亏损）：**{stats_block['profit_loss_ratio']:.2f}** → 数值越高，潜在回报越优")
-    st.write(f"- 夏普比率（年化，假设无风险利率为2.5%）：**{stats_block['sharpe']:.2f}** → 大于0.5可视为尚可，大于1优秀")
+        # ---- 详细指标表（折叠） ----
+        with st.expander("📊 展开查看详细指标对比表"):
+            df_stats = pd.DataFrame({
+                '方法': ['简单随机抽样', '块状抽样（推荐）', '几何布朗运动'],
+                '平均预期': [f"{stats_simple['mean']:.2f}", f"{stats_block['mean']:.2f}", f"{stats_gbm['mean']:.2f}"],
+                '中位数': [f"{stats_simple['median']:.2f}", f"{stats_block['median']:.2f}", f"{stats_gbm['median']:.2f}"],
+                '25%分位': [f"{stats_simple['p25']:.2f}", f"{stats_block['p25']:.2f}", f"{stats_gbm['p25']:.2f}"],
+                '75%分位': [f"{stats_simple['p75']:.2f}", f"{stats_block['p75']:.2f}", f"{stats_gbm['p75']:.2f}"],
+                '5%底线': [f"{stats_simple['p5']:.2f}", f"{stats_block['p5']:.2f}", f"{stats_gbm['p5']:.2f}"],
+                '95%上限': [f"{stats_simple['p95']:.2f}", f"{stats_block['p95']:.2f}", f"{stats_gbm['p95']:.2f}"],
+                '胜率': [f"{stats_simple['win_rate']:.1%}", f"{stats_block['win_rate']:.1%}", f"{stats_gbm['win_rate']:.1%}"],
+                '盈亏比': [f"{stats_simple['profit_loss_ratio']:.2f}" if stats_simple['profit_loss_ratio'] != np.inf else "∞",
+                           f"{stats_block['profit_loss_ratio']:.2f}" if stats_block['profit_loss_ratio'] != np.inf else "∞",
+                           f"{stats_gbm['profit_loss_ratio']:.2f}" if stats_gbm['profit_loss_ratio'] != np.inf else "∞"],
+                '夏普比率': [f"{stats_simple['sharpe']:.2f}", f"{stats_block['sharpe']:.2f}", f"{stats_gbm['sharpe']:.2f}"],
+                '5%亏损': [f"{stats_simple['max_loss_pct']:.1f}%",
+                          f"{stats_block['max_loss_pct']:.1f}%",
+                          f"{stats_gbm['max_loss_pct']:.1f}%"]
+            })
+            st.dataframe(df_stats, use_container_width=True, hide_index=True)
+            st.caption("💡 推荐以 **块状抽样** 为核心参考，因为它保留了真实的时间序列特征。")
 
-    if stats_block['mean'] > stats_block['median']:
-        st.info("💡 分布右偏（平均值>中位数）：存在少数暴涨拉高平均值的可能性，有“彩票式”上涨潜力。")
-    elif stats_block['mean'] < stats_block['median']:
-        st.warning("⚠️ 分布左偏（平均值<中位数）：少数暴跌拉低平均值，极端下跌风险不容忽视。")
-    else:
-        st.info("💡 分布对称，上下风险均衡。")
+        # ---- 路径和分布图（折叠） ----
+        with st.expander("📉 展开查看模拟路径和分布图"):
+            st.write("**模拟路径示例（随机 3 条）**")
+            returns = np.diff(df_hist['close'].values) / df_hist['close'].values[:-1]
+            last_price = current_price
+            n_days = forecast_days
+            sample_paths = []
+            for _ in range(3):
+                daily_ret = np.random.choice(returns, size=n_days, replace=True)
+                path = last_price * np.exp(np.cumsum(daily_ret))
+                sample_paths.append(path)
+            df_paths = pd.DataFrame(sample_paths).T
+            df_paths.columns = [f'路径{i+1}' for i in range(3)]
+            st.line_chart(df_paths)
 
-    st.write("**模拟路径示例（随机 3 条）**")
-    returns = np.diff(df_hist['close'].values) / df_hist['close'].values[:-1]
-    last_price = current_price
-    n_days = forecast_days
-    sample_paths = []
-    for _ in range(3):
-        daily_ret = np.random.choice(returns, size=n_days, replace=True)
-        path = last_price * np.exp(np.cumsum(daily_ret))
-        sample_paths.append(path)
-    df_paths = pd.DataFrame(sample_paths).T
-    df_paths.columns = [f'路径{i+1}' for i in range(3)]
-    st.line_chart(df_paths)
+            st.write("**块状抽样终值分布（价格）**")
+            hist, bin_edges = np.histogram(final_block, bins=30)
+            hist_df = pd.DataFrame({
+                '价格区间': (bin_edges[:-1] + bin_edges[1:]) / 2,
+                '频数': hist
+            })
+            st.bar_chart(hist_df.set_index('价格区间'))
+            st.caption(f"当前价 {current_price:.2f} | 中位数 {stats_block['median']:.2f} | 5%底线 {stats_block['p5']:.2f} | 25%-75%区间 {stats_block['p25']:.2f}-{stats_block['p75']:.2f}")
 
-    st.write("**块状抽样终值分布（价格）**")
-    hist, bin_edges = np.histogram(final_block, bins=30)
-    hist_df = pd.DataFrame({
-        '价格区间': (bin_edges[:-1] + bin_edges[1:]) / 2,
-        '频数': hist
-    })
-    st.bar_chart(hist_df.set_index('价格区间'))
-    st.caption(f"当前价 {current_price:.2f} | 中位数 {stats_block['median']:.2f} | 5%底线 {stats_block['p5']:.2f} | 25%-75%区间 {stats_block['p25']:.2f}-{stats_block['p75']:.2f}")
+        st.info("⭐ 推荐以 **块状抽样** 结果为核心参考，因为它保留了真实的时间序列特征，最接近实际交易环境。")
 
-    st.info("⭐ 推荐以 **块状抽样** 结果为核心参考，因为它保留了真实的时间序列特征，最接近实际交易环境。")
-
-    return stats_block
+        return stats_block
 
 # =========================================================
 # 显示函数（原有）
