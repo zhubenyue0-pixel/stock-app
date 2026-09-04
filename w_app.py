@@ -59,7 +59,7 @@ if not auth["authenticated"]:
 # =========================================================
 
 st.title("📈 三合一量化指标 + 统计模拟")
-st.caption("数据源：zzshare · 技术信号 + 四张网 + 板块轮动 + 统计模拟（增强版）")
+st.caption("数据源：zzshare · 技术信号 + 四张网 + 板块轮动 + 统计模拟（可调参数）")
 
 # =========================================================
 # 数据持久化（股票/板块列表）
@@ -128,12 +128,49 @@ else:
     quick_code = ""
 
 code = st.sidebar.text_input("6位股票代码", placeholder="600519", value=quick_code if quick_code else "600519")
-days = st.sidebar.slider("分析周期（天）", 60, 250, 120)
+
+# ---- 技术信号分析周期（改为快捷选择 + 自定义输入） ----
+st.sidebar.subheader("📊 技术信号参数")
+tech_preset = st.sidebar.selectbox(
+    "技术信号分析周期",
+    options=["自定义", "1个月(20)", "3个月(63)", "半年(126)", "1年(252)", "1.5年(378)", "2年(504)", "3年(756)", "5年(1260)", "10年(2520)", "20年(5040)"],
+    index=3  # 默认1年
+)
+if tech_preset != "自定义":
+    tech_days = int(tech_preset.split('(')[1].rstrip(')'))
+else:
+    tech_days = st.sidebar.number_input("手动输入分析天数", min_value=20, max_value=10000, value=252, step=10,
+                                        help="技术信号分析使用的历史数据天数")
 
 # ---- 统计模拟参数 ----
 st.sidebar.subheader("📈 统计模拟参数")
 n_simulations = st.sidebar.number_input("模拟次数", min_value=1000, max_value=50000, value=5000, step=1000,
                                         help="越多越准，但耗时增加。建议 5000~10000")
+
+# 历史数据长度（无限制，提供快捷选项）
+st.sidebar.write("**历史数据长度（天）**")
+hist_preset = st.sidebar.selectbox(
+    "快捷选择历史长度",
+    options=["自定义", "1个月(20)", "3个月(63)", "半年(126)", "1年(252)", "1.5年(378)", "2年(504)", "3年(756)", "5年(1260)", "10年(2520)", "20年(5040)"],
+    index=3  # 默认1年
+)
+if hist_preset != "自定义":
+    hist_days = int(hist_preset.split('(')[1].rstrip(')'))
+else:
+    hist_days = st.sidebar.number_input("手动输入历史天数", min_value=20, max_value=10000, value=252, step=10,
+                                        help="建议至少252天（一年），数据源可提供近20年数据")
+
+# 预测未来天数（无限制，提供快捷选项）
+st.sidebar.write("**预测未来天数**")
+forecast_preset = st.sidebar.selectbox(
+    "快捷选择预测长度",
+    options=["自定义", "1个月(20)", "3个月(63)", "半年(126)", "1年(252)", "1.5年(378)", "2年(504)", "3年(756)"],
+    index=2  # 默认1年
+)
+if forecast_preset != "自定义":
+    forecast_days = int(forecast_preset.split('(')[1].rstrip(')'))
+else:
+    forecast_days = st.sidebar.number_input("手动输入预测天数", min_value=20, max_value=5000, value=252, step=10)
 
 with st.sidebar.expander("🏛️ 四张网参数", expanded=False):
     bond_yield = st.number_input("10年期国债收益率（%）", min_value=0.0, max_value=10.0, value=2.5, step=0.1)
@@ -178,6 +215,7 @@ st.sidebar.subheader("☑️ 综合分析勾选")
 include_tech = st.sidebar.checkbox("技术信号模型", value=True)
 include_nets = st.sidebar.checkbox("四张网", value=True)
 include_sector = st.sidebar.checkbox("板块轮动", value=True)
+include_sim = st.sidebar.checkbox("统计模拟", value=True)
 
 st.sidebar.divider()
 if st.sidebar.button("⚙️ 设置（管理股票/板块）", use_container_width=True, type="primary"):
@@ -189,7 +227,7 @@ if st.session_state.view == "设置":
         st.rerun()
 
 # =========================================================
-# 核心函数（获取数据、技术信号、四张网、板块轮动）
+# 核心函数
 # =========================================================
 def fetch_stock_data(code, days):
     api = DataApi()
@@ -365,30 +403,38 @@ def calc_sector_rotation(stock_sector, top1, top1_ch, top2, top2_ch, top3, top3_
             result['market_style'] = "板块轮动无明显主线"
     else:
         result['market_style'] = "板块数据未填写"
-    return result
+    return results
 
 # =========================================================
-# 统计模拟函数（三种方法）
+# 统计模拟函数（三种方法，参数化，独立获取数据）
 # =========================================================
 @st.cache_data(ttl=3600)
-def run_simulations(close_prices, n_sim=5000):
+def run_simulations_for_code(code, hist_len, forecast_days, n_sim=5000):
     """
-    输入：收盘价序列（numpy array）
-    输出：三种方法的模拟终值数组
+    根据股票代码和长度获取数据并运行模拟
     """
-    returns = np.diff(close_prices) / close_prices[:-1]
+    df = fetch_stock_data(code, hist_len + 60)  # 多取一些确保够
+    if df is None or len(df) == 0:
+        return None, None, None
+    close = df['close'].values
+    if len(close) < hist_len:
+        # 如果数据不足，使用全部
+        used = close
+    else:
+        used = close[-hist_len:]
+    returns = np.diff(used) / used[:-1]
     if len(returns) == 0:
         return None, None, None
-    last_price = close_prices[-1]
-    n_days = 252
+    last_price = used[-1]
+    n_days = forecast_days
 
-    # 1. 简单随机抽样
+    # 简单随机抽样
     np.random.seed(42)
     sim_simple = np.random.choice(returns, size=(n_sim, n_days), replace=True)
     paths_simple = last_price * np.exp(np.cumsum(sim_simple, axis=1))
     final_simple = paths_simple[:, -1]
 
-    # 2. 块状抽样（块大小20）
+    # 块状抽样
     block_size = 20
     n_blocks = len(returns) // block_size
     blocks = [returns[i*block_size:(i+1)*block_size] for i in range(n_blocks)]
@@ -401,7 +447,7 @@ def run_simulations(close_prices, n_sim=5000):
     paths_block = last_price * np.exp(np.cumsum(sim_block, axis=1))
     final_block = paths_block[:, -1]
 
-    # 3. 几何布朗运动（GBM）
+    # GBM
     mu = np.mean(returns)
     sigma = np.std(returns)
     if sigma == 0:
@@ -413,31 +459,25 @@ def run_simulations(close_prices, n_sim=5000):
         gbm_paths = last_price * np.exp(np.cumsum(drift*dt + sigma*np.sqrt(dt)*random_shocks, axis=1))
         final_gbm = gbm_paths[:, -1]
 
-    return final_simple, final_block, final_gbm
+    return final_simple, final_block, final_gbm, last_price, df
 
 # =========================================================
-# 增强版统计模拟显示函数
+# 统计模拟显示函数（使用独立获取的数据）
 # =========================================================
-def display_statistical_simulation(df, n_sim):
-    """显示统计模拟结果（增强版：更多指标）"""
-    st.subheader("📈 统计模拟预测（未来一年价格分布）")
+def display_statistical_simulation(code, hist_len, forecast_days, n_sim):
+    st.subheader(f"📈 统计模拟预测（未来 {forecast_days} 天，基于最近 {hist_len} 天历史）")
 
-    close = df['close'].values
-    if len(close) < 252:
-        st.warning("⚠️ 历史数据不足252天，模拟结果可能不准确，建议使用更长周期（120天以上）。")
-        return
-
-    with st.spinner(f"正在运行 {n_sim} 次模拟，请稍候..."):
-        final_simple, final_block, final_gbm = run_simulations(close, n_sim)
+    with st.spinner(f"正在获取 {code} 的历史数据并运行 {n_sim} 次模拟..."):
+        final_simple, final_block, final_gbm, current_price, df_hist = run_simulations_for_code(code, hist_len, forecast_days, n_sim)
 
     if final_simple is None:
         st.error("❌ 数据不足，无法模拟")
         return
 
-    current_price = close[-1]
+    actual_len = len(df_hist)
+    st.write(f"实际使用历史数据：{actual_len} 天")
 
     def calc_full_stats(arr):
-        # 基础统计
         mean = np.mean(arr)
         median = np.median(arr)
         p5 = np.percentile(arr, 5)
@@ -446,19 +486,15 @@ def display_statistical_simulation(df, n_sim):
         p95 = np.percentile(arr, 95)
         p1 = np.percentile(arr, 1)
         p99 = np.percentile(arr, 99)
-        # 胜率：终值高于当前价的比例
         win_rate = np.mean(arr > current_price)
-        # 盈亏比
         gains = arr[arr > current_price] - current_price
         losses = current_price - arr[arr < current_price]
         avg_gain = np.mean(gains) if len(gains) > 0 else 0
         avg_loss = np.mean(losses) if len(losses) > 0 else 0
         profit_loss_ratio = avg_gain / avg_loss if avg_loss > 0 else np.inf
-        # 夏普比率（年化）
         returns_sim = (arr - current_price) / current_price
         sharpe = np.mean(returns_sim) / np.std(returns_sim) * np.sqrt(252) if np.std(returns_sim) > 0 else 0
-        # 最大亏损（相对于当前价）
-        max_loss_pct = (current_price - p5) / current_price
+        max_loss_pct = (current_price - p5) / current_price * 100
         return {
             'mean': mean,
             'median': median,
@@ -478,7 +514,6 @@ def display_statistical_simulation(df, n_sim):
     stats_block = calc_full_stats(final_block)
     stats_gbm = calc_full_stats(final_gbm)
 
-    # 显示详细的统计表格
     st.write("**📊 详细指标对比表**")
     df_stats = pd.DataFrame({
         '方法': ['简单随机抽样', '块状抽样（推荐）', '几何布朗运动'],
@@ -493,13 +528,12 @@ def display_statistical_simulation(df, n_sim):
                    f"{stats_block['profit_loss_ratio']:.2f}" if stats_block['profit_loss_ratio'] != np.inf else "∞",
                    f"{stats_gbm['profit_loss_ratio']:.2f}" if stats_gbm['profit_loss_ratio'] != np.inf else "∞"],
         '夏普比率（年化）': [f"{stats_simple['sharpe']:.2f}", f"{stats_block['sharpe']:.2f}", f"{stats_gbm['sharpe']:.2f}"],
-        '5%底线亏损幅度': [f"{(stats_simple['max_loss_pct']*100):.1f}%",
-                         f"{(stats_block['max_loss_pct']*100):.1f}%",
-                         f"{(stats_gbm['max_loss_pct']*100):.1f}%"]
+        '5%底线亏损幅度': [f"{stats_simple['max_loss_pct']:.1f}%",
+                         f"{stats_block['max_loss_pct']:.1f}%",
+                         f"{stats_gbm['max_loss_pct']:.1f}%"]
     })
     st.table(df_stats)
 
-    # 解读
     st.write("**📌 如何解读：**")
     st.write(f"- 当前价格：**{current_price:.2f}**")
     st.write(f"- 块状抽样中位数（最可能的价格）：**{stats_block['median']:.2f}** → 当前价格{'低于' if current_price < stats_block['median'] else '高于'}中位数，可能{'偏低估' if current_price < stats_block['median'] else '偏高估'}")
@@ -516,11 +550,11 @@ def display_statistical_simulation(df, n_sim):
     else:
         st.info("💡 分布对称，上下风险均衡。")
 
-    # 显示模拟路径示例（随机选3条）
+    # 显示模拟路径示例
     st.write("**模拟路径示例（随机 3 条）**")
-    returns = np.diff(close) / close[:-1]
-    last_price = close[-1]
-    n_days = 252
+    returns = np.diff(df_hist['close'].values) / df_hist['close'].values[:-1]
+    last_price = current_price
+    n_days = forecast_days
     sample_paths = []
     for _ in range(3):
         daily_ret = np.random.choice(returns, size=n_days, replace=True)
@@ -530,7 +564,7 @@ def display_statistical_simulation(df, n_sim):
     df_paths.columns = [f'路径{i+1}' for i in range(3)]
     st.line_chart(df_paths)
 
-    # 显示分布直方图（块状抽样的终值分布）
+    # 分布直方图
     st.write("**块状抽样终值分布（价格）**")
     hist, bin_edges = np.histogram(final_block, bins=30)
     hist_df = pd.DataFrame({
@@ -540,8 +574,10 @@ def display_statistical_simulation(df, n_sim):
     st.bar_chart(hist_df.set_index('价格区间'))
     st.caption(f"当前价 {current_price:.2f} | 中位数 {stats_block['median']:.2f} | 5%底线 {stats_block['p5']:.2f} | 25%-75%区间 {stats_block['p25']:.2f}-{stats_block['p75']:.2f}")
 
-    # 推荐结论
     st.info("⭐ 推荐以 **块状抽样** 结果为核心参考，因为它保留了真实的时间序列特征，最接近实际交易环境。")
+
+    # 返回统计指标供综合分析使用
+    return stats_block
 
 # =========================================================
 # 显示函数（原有）
@@ -645,31 +681,38 @@ def display_sector_rotation(result):
         st.write("**市场风格判断**")
         st.write(result['market_style'])
 
-def display_comprehensive(signals, nets, sector_result, modules):
+def display_comprehensive(signals, nets, sector_result, sim_stats, modules):
+    """综合分析汇总（新增统计模拟指标）"""
     with st.container():
         st.subheader("📊 综合分析汇总")
+        
+        # ---- 技术信号 ----
         if modules.get('tech', False):
             count = sum([signals['w_pattern'], signals['obv_divergence'], signals['mfi_oversold_bounce'], signals['big_money_active']])
-            st.write(f"**技术信号模型**：触发 {count}/4 个信号")
+            st.write(f"**📊 技术信号模型**：触发 {count}/4 个信号")
             if count >= 3:
                 st.success("✅ 多信号共振")
             elif count >= 2:
                 st.warning("⚠️ 部分信号吻合")
             else:
                 st.info("💡 信号偏弱")
+        
+        # ---- 四张网 ----
         if modules.get('nets', False):
             erp_ok = nets['erp'] > 0.03
             cash_ok = nets['receivables_ratio'] is not None and nets['receivables_ratio'] < 30
             valuation_ok = nets['pe_percentile'] < 0.3
             liquidity_ok = nets['liquidity_good']
             net_score = sum([erp_ok, cash_ok, valuation_ok, liquidity_ok])
-            st.write(f"**四张网**：{net_score}/4 项健康")
+            st.write(f"**🏛️ 四张网**：{net_score}/4 项健康")
             if net_score >= 3:
                 st.success("✅ 基本面综合较好")
             elif net_score >= 2:
                 st.warning("⚠️ 部分指标健康")
             else:
                 st.info("💡 基本面偏弱")
+        
+        # ---- 板块轮动 ----
         if modules.get('sector', False):
             if '强势' in sector_result.get('sector_status', ''):
                 st.success("✅ 板块轮动：当前股票所属板块强势")
@@ -679,6 +722,24 @@ def display_comprehensive(signals, nets, sector_result, modules):
                 st.info("💡 板块轮动：当前股票所属板块中性或蓄势")
             else:
                 st.info("💡 板块轮动：未填写数据")
+        
+        # ---- 统计模拟（新增） ----
+        if modules.get('sim', False) and sim_stats is not None:
+            st.write(f"**📈 统计模拟（块状抽样）**")
+            st.write(f"- 中位数（最可能价格）：**{sim_stats['median']:.2f}** → 当前价格{'低于' if sim_stats['current_price'] < sim_stats['median'] else '高于'}中位数，可能{'偏低估' if sim_stats['current_price'] < sim_stats['median'] else '偏高估'}")
+            st.write(f"- 5%底线（极端风险）：**{sim_stats['p5']:.2f}** → 最大潜在跌幅约 {sim_stats['max_loss_pct']:.1f}%")
+            st.write(f"- 胜率（模拟终值高于当前价）：**{sim_stats['win_rate']:.1%}**")
+            st.write(f"- 盈亏比：**{sim_stats['profit_loss_ratio']:.2f}** → {'优秀（>2）' if sim_stats['profit_loss_ratio'] > 2 else '尚可（1~2）' if sim_stats['profit_loss_ratio'] > 1 else '偏低（<1）'}")
+            st.write(f"- 夏普比率（年化）：**{sim_stats['sharpe']:.2f}** → {'优秀（>1）' if sim_stats['sharpe'] > 1 else '尚可（0.5~1）' if sim_stats['sharpe'] > 0.5 else '偏低（<0.5）'}")
+            if sim_stats['win_rate'] > 0.6 and sim_stats['sharpe'] > 0.5:
+                st.success("✅ 统计模拟显示：胜率较高 + 夏普尚可，概率上偏向有利")
+            elif sim_stats['win_rate'] < 0.4 and sim_stats['max_loss_pct'] > 20:
+                st.warning("⚠️ 统计模拟显示：胜率偏低 + 极端风险较大，需谨慎")
+            else:
+                st.info("💡 统计模拟显示：信号中性，建议结合其他模块判断")
+        elif modules.get('sim', False) and sim_stats is None:
+            st.info("💡 统计模拟：数据不足，无法计算")
+        
         st.divider()
         st.caption("💡 综合分析仅反映当前状态，不构成投资建议")
 
@@ -761,7 +822,7 @@ else:
     def get_data(code, days):
         return fetch_stock_data(code, days)
 
-    df = get_data(code, days)
+    df = get_data(code, tech_days)
 
     if df is None or df.empty:
         st.warning("⚠️ 数据获取失败，请检查股票代码或网络")
@@ -810,12 +871,32 @@ else:
         elif active == 'sector':
             display_sector_rotation(sector_result)
         elif active == 'simulation':
-            display_statistical_simulation(df, n_simulations)
+            display_statistical_simulation(code, hist_days, forecast_days, n_simulations)
         elif active == 'comprehensive':
-            display_comprehensive(signals, nets, sector_result, {
+            # 预计算统计模拟结果（用于综合分析）
+            try:
+                # 运行模拟获取指标
+                final_simple, final_block, final_gbm, current_price, df_hist = run_simulations_for_code(code, hist_days, forecast_days, n_simulations)
+                if final_block is not None:
+                    sim_stats = {
+                        'current_price': current_price,
+                        'median': np.median(final_block),
+                        'p5': np.percentile(final_block, 5),
+                        'win_rate': np.mean(final_block > current_price),
+                        'profit_loss_ratio': np.mean(final_block[final_block > current_price] - current_price) / np.mean(current_price - final_block[final_block < current_price]) if np.mean(current_price - final_block[final_block < current_price]) > 0 else np.inf,
+                        'sharpe': (np.mean(final_block - current_price) / np.std(final_block - current_price)) * np.sqrt(252) if np.std(final_block - current_price) > 0 else 0,
+                        'max_loss_pct': (current_price - np.percentile(final_block, 5)) / current_price * 100
+                    }
+                else:
+                    sim_stats = None
+            except:
+                sim_stats = None
+            
+            display_comprehensive(signals, nets, sector_result, sim_stats, {
                 'tech': include_tech,
                 'nets': include_nets,
-                'sector': include_sector
+                'sector': include_sector,
+                'sim': include_sim
             })
         
         # 所有模块下方显示走势图
