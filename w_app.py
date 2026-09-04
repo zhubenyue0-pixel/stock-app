@@ -5,18 +5,16 @@ from scipy.signal import argrelmin
 from zzshare.client import DataApi
 import json
 import os
-import matplotlib.pyplot as plt
 import warnings
 warnings.filterwarnings('ignore')
 
 st.set_page_config(page_title="智能双底检测器", layout="wide")
-st.title("📈 智能W型双底检测器")
-st.caption("数据源：zzshare · 技术信号 + 四张网 + 板块轮动 + 风险评估")
 
 # =========================================================
 # 🔐 登录功能（兼容本地和云端）
 # =========================================================
 
+# 尝试从secrets读取密码，如果失败则使用明文（本地测试用）
 try:
     USERNAME = st.secrets["USERNAME"]
     PASSWORD = st.secrets["PASSWORD"]
@@ -36,6 +34,7 @@ def login_form():
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
             with st.form("login_form"):
+                # 输入框无预填值，只显示提示文字
                 username = st.text_input("用户名", placeholder="请输入用户名")
                 password = st.text_input("密码", placeholder="请输入密码", type="password")
                 submitted = st.form_submit_button("登录", use_container_width=True, type="primary")
@@ -59,6 +58,11 @@ auth = get_auth_state()
 if not auth["authenticated"]:
     login_form()
     st.stop()
+# =========================================================
+
+# 显示标题
+st.title("📈 智能W型双底检测器")
+st.caption("数据源：zzshare · 独立模块 + 侧边栏设置入口")
 
 # =========================================================
 # 数据持久化
@@ -362,131 +366,7 @@ def calc_sector_rotation(stock_sector, top1, top1_ch, top2, top2_ch, top3, top3_
     return result
 
 # =========================================================
-# 风险评估模型
-# =========================================================
-def calc_risk_model(df, n_simulations=10000, T=252, block_size=20):
-    prices = df['close'].values
-    if len(prices) < 30:
-        return None, None, None, None, None
-    P0 = prices[-1]
-    returns = prices[1:] / prices[:-1] - 1
-    N = len(returns)
-    if N < block_size:
-        block_size = max(5, N // 10)
-    # 方法一
-    final_prices_simple = []
-    for i in range(n_simulations):
-        sampled_returns = np.random.choice(returns, size=T, replace=True)
-        final_prices_simple.append(P0 * np.prod(1 + sampled_returns))
-    final_prices_simple = np.array(final_prices_simple)
-    # 方法二
-    blocks = []
-    for i in range(N - block_size + 1):
-        blocks.append(returns[i:i + block_size])
-    M = len(blocks)
-    final_prices_block = []
-    if M > 0:
-        for i in range(n_simulations):
-            seq = []
-            while len(seq) < T:
-                chosen = blocks[np.random.randint(0, M)]
-                seq.extend(chosen)
-            seq = np.array(seq[:T])
-            final_prices_block.append(P0 * np.prod(1 + seq))
-    final_prices_block = np.array(final_prices_block) if final_prices_block else np.array([P0])
-    # 方法三
-    mu = np.mean(returns) * 252
-    sigma = np.std(returns) * np.sqrt(252)
-    dt = 1/252
-    final_prices_gbm = []
-    for i in range(n_simulations):
-        Z = np.random.normal(0, 1, T)
-        daily_returns = np.exp((mu - 0.5 * sigma**2) * dt + sigma * np.sqrt(dt) * Z) - 1
-        final_prices_gbm.append(P0 * np.prod(1 + daily_returns))
-    final_prices_gbm = np.array(final_prices_gbm)
-    metrics = {
-        "模型": ["简单抽样", "块状抽样", "GBM"],
-        "平均预期": [
-            np.mean(final_prices_simple),
-            np.mean(final_prices_block),
-            np.mean(final_prices_gbm)
-        ],
-        "中位数": [
-            np.median(final_prices_simple),
-            np.median(final_prices_block),
-            np.median(final_prices_gbm)
-        ],
-        "5%风险底线": [
-            np.percentile(final_prices_simple, 5),
-            np.percentile(final_prices_block, 5),
-            np.percentile(final_prices_gbm, 5)
-        ],
-        "95%上限": [
-            np.percentile(final_prices_simple, 95),
-            np.percentile(final_prices_block, 95),
-            np.percentile(final_prices_gbm, 95)
-        ]
-    }
-    return metrics, final_prices_simple, final_prices_block, final_prices_gbm, P0
-
-def display_risk_model(df):
-    with st.container():
-        st.subheader("📊 三维量化风险评估模型")
-        st.caption("基于三种统计方法模拟未来一年价格分布，评估极端风险")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            n_sim = st.number_input("模拟次数", min_value=1000, max_value=50000, value=10000, step=1000, key="risk_n_sim")
-        with col2:
-            t_days = st.number_input("预测天数", min_value=50, max_value=500, value=252, step=10, key="risk_t_days")
-        with col3:
-            block = st.number_input("块大小(方法二)", min_value=5, max_value=60, value=20, step=5, key="risk_block")
-        with st.spinner("⏳ 正在运行三维模拟计算（可能需要几秒钟）..."):
-            metrics, prices_simple, prices_block, prices_gbm, P0 = calc_risk_model(
-                df, n_simulations=n_sim, T=t_days, block_size=block
-            )
-            if metrics is None:
-                st.warning("⚠️ 数据不足，无法进行风险评估")
-                return
-            df_metrics = pd.DataFrame(metrics)
-            st.write("**📋 三维模型对比总结**")
-            st.dataframe(df_metrics.round(2), use_container_width=True, hide_index=True)
-            st.write("**💡 风险解读**")
-            median_block = metrics["中位数"][1]
-            p5_block = metrics["5%风险底线"][1]
-            col1, col2 = st.columns(2)
-            with col1:
-                if median_block > P0:
-                    st.success(f"✅ 中位数（{median_block:.2f}）> 当前价（{P0:.2f}），模型认为正常情况会上涨")
-                else:
-                    st.warning(f"⚠️ 中位数（{median_block:.2f}）< 当前价（{P0:.2f}），模型认为正常情况会下跌")
-            with col2:
-                risk_pct = (P0 - p5_block) / P0 * 100 if p5_block < P0 else 0
-                if risk_pct > 20:
-                    st.error(f"🔴 5%风险底线（{p5_block:.2f}）距当前价 {risk_pct:.1f}%，短期暴跌风险较高！")
-                elif risk_pct > 10:
-                    st.warning(f"🟡 5%风险底线（{p5_block:.2f}）距当前价 {risk_pct:.1f}%，需注意下行风险")
-                else:
-                    st.success(f"🟢 5%风险底线（{p5_block:.2f}）距当前价 {risk_pct:.1f}%，极端风险相对可控")
-            st.write("**📉 三色叠加分布图**")
-            fig, ax = plt.subplots(figsize=(14, 6))
-            ax.hist(prices_simple, bins=50, alpha=0.4, color='salmon', label='简单抽样', edgecolor='none')
-            ax.hist(prices_block, bins=50, alpha=0.4, color='steelblue', label='块状抽样', edgecolor='none')
-            ax.hist(prices_gbm, bins=50, alpha=0.4, color='lightgreen', label='GBM', edgecolor='none')
-            ax.axvline(P0, color='black', linestyle='-', linewidth=2.5, label=f'当前价: {P0:.2f}')
-            mean_block = np.mean(prices_block)
-            p5_block_val = np.percentile(prices_block, 5)
-            ax.axvline(mean_block, color='blue', linestyle='--', linewidth=2, label=f'块状均值: {mean_block:.2f}')
-            ax.axvline(p5_block_val, color='red', linestyle=':', linewidth=2.5, label=f'块状5%底线: {p5_block_val:.2f}')
-            ax.set_title('三种量化模型分布对比', fontsize=14)
-            ax.set_xlabel('未来一年模拟终点价格', fontsize=12)
-            ax.set_ylabel('出现频次', fontsize=12)
-            ax.legend(loc='upper right')
-            ax.grid(True, alpha=0.2)
-            st.pyplot(fig)
-            st.caption("📌 红虚线（5%底线）：代表极端情况下可能跌到的位置 | 蓝虚线（块状均值）：代表最可信的预期平均价 | 三种颜色重叠越多的区域，代表三种模型观点越一致")
-
-# =========================================================
-# 显示函数（原有）
+# 显示函数
 # =========================================================
 def display_technical_signals(signals):
     with st.container():
@@ -626,6 +506,7 @@ def display_comprehensive(signals, nets, sector_result, modules):
 
 def display_settings():
     st.subheader("⚙️ 设置 - 管理常用股票与板块")
+    
     st.write("### 📌 管理常用股票")
     if st.session_state.favorites:
         fav_df = pd.DataFrame(list(st.session_state.favorites.items()), columns=["名称", "代码"])
@@ -639,6 +520,7 @@ def display_settings():
                 st.rerun()
     else:
         st.info("暂无常用股票")
+    
     col1, col2, col3 = st.columns([2, 2, 1])
     with col1:
         new_name = st.text_input("股票名称", placeholder="如：紫金矿业", key="new_name_setting")
@@ -653,7 +535,9 @@ def display_settings():
                 st.rerun()
             else:
                 st.error("请输入名称和正确的6位代码")
+    
     st.divider()
+    
     st.write("### 📂 管理板块列表")
     if st.session_state.sectors:
         sector_str = "、".join(st.session_state.sectors)
@@ -670,6 +554,7 @@ def display_settings():
                 st.error("请选择要删除的板块")
     else:
         st.info("暂无板块")
+    
     col1, col2 = st.columns([3, 1])
     with col1:
         new_sector = st.text_input("板块名称", placeholder="如：AI", key="new_sector_setting")
@@ -684,6 +569,7 @@ def display_settings():
                 st.warning("该板块已存在")
             else:
                 st.error("请输入板块名称")
+    
     st.divider()
     st.caption("💡 所有修改自动保存到本地 JSON 文件，关闭网页后依然保留")
 
@@ -698,6 +584,7 @@ else:
         return fetch_stock_data(code, days)
 
     df = get_data(code, days)
+
     if df is None or df.empty:
         st.warning("⚠️ 数据获取失败，请检查股票代码或网络")
         st.stop()
@@ -710,8 +597,7 @@ else:
         flow1_amount, flow2_amount, flow3_amount
     )
 
-    # 五个按钮
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         if st.button("📊 技术信号模型", use_container_width=True):
             st.session_state['active'] = 'tech'
@@ -724,9 +610,6 @@ else:
     with col4:
         if st.button("🎯 综合分析", use_container_width=True):
             st.session_state['active'] = 'comprehensive'
-    with col5:
-        if st.button("📊 风险评估", use_container_width=True):
-            st.session_state['active'] = 'risk'
 
     st.divider()
 
@@ -749,8 +632,6 @@ else:
                 'nets': include_nets,
                 'sector': include_sector
             })
-        elif active == 'risk':
-            display_risk_model(df)
         
         st.subheader("📉 近期走势图")
         st.line_chart(df.set_index('date')['close'])
