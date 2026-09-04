@@ -59,7 +59,7 @@ if not auth["authenticated"]:
 # =========================================================
 
 st.title("📈 模拟分析")
-st.caption("数据源：zzshare · 技术信号 + 四张网 + 板块轮动 + 统计模拟（可调参数）")
+st.caption("数据源：zzshare · 技术信号 + 四张网 + 板块轮动 + 概念板块 + 统计模拟（可调参数）")
 
 # =========================================================
 # 数据持久化（股票/板块列表）
@@ -142,33 +142,35 @@ else:
     tech_days = st.sidebar.number_input("手动输入分析天数", min_value=20, max_value=10000, value=252, step=10,
                                         help="技术信号分析使用的历史数据天数")
 
-# ---- 统计模拟参数 ----
-st.sidebar.subheader("📈 统计模拟参数")
-n_simulations = st.sidebar.number_input("模拟次数", min_value=1000, max_value=50000, value=5000, step=1000,
-                                        help="越多越准，但耗时增加。建议 5000~10000")
-
-st.sidebar.write("**历史数据长度（天）**")
-hist_preset = st.sidebar.selectbox(
-    "快捷选择历史长度",
-    options=["自定义", "1个月(20)", "3个月(63)", "半年(126)", "1年(252)", "1.5年(378)", "2年(504)", "3年(756)", "5年(1260)", "10年(2520)", "20年(5040)"],
-    index=3
-)
-if hist_preset != "自定义":
-    hist_days = int(hist_preset.split('(')[1].rstrip(')'))
-else:
-    hist_days = st.sidebar.number_input("手动输入历史天数", min_value=20, max_value=10000, value=252, step=10,
-                                        help="建议至少252天（一年），数据源可提供近20年数据")
-
-st.sidebar.write("**预测未来天数**")
-forecast_preset = st.sidebar.selectbox(
-    "快捷选择预测长度",
-    options=["自定义", "1个月(20)", "3个月(63)", "半年(126)", "1年(252)", "1.5年(378)", "2年(504)", "3年(756)"],
-    index=2
-)
-if forecast_preset != "自定义":
-    forecast_days = int(forecast_preset.split('(')[1].rstrip(')'))
-else:
-    forecast_days = st.sidebar.number_input("手动输入预测天数", min_value=20, max_value=5000, value=252, step=10)
+# ---- 统计预测参数（可折叠） ----
+with st.sidebar.expander("📈 统计预测参数", expanded=False):
+    n_simulations = st.number_input("模拟次数", min_value=1000, max_value=50000, value=5000, step=1000,
+                                    help="越多越准，但耗时增加。建议 5000~10000")
+    
+    st.write("**历史数据长度（天）**")
+    hist_preset = st.selectbox(
+        "快捷选择历史长度",
+        options=["自定义", "1个月(20)", "3个月(63)", "半年(126)", "1年(252)", "1.5年(378)", "2年(504)", "3年(756)", "5年(1260)", "10年(2520)", "20年(5040)"],
+        index=3,
+        key="hist_preset"
+    )
+    if hist_preset != "自定义":
+        hist_days = int(hist_preset.split('(')[1].rstrip(')'))
+    else:
+        hist_days = st.number_input("手动输入历史天数", min_value=20, max_value=10000, value=252, step=10,
+                                    help="建议至少252天（一年），数据源可提供近20年数据")
+    
+    st.write("**预测未来天数**")
+    forecast_preset = st.selectbox(
+        "快捷选择预测长度",
+        options=["自定义", "1个月(20)", "3个月(63)", "半年(126)", "1年(252)", "1.5年(378)", "2年(504)", "3年(756)"],
+        index=2,
+        key="forecast_preset"
+    )
+    if forecast_preset != "自定义":
+        forecast_days = int(forecast_preset.split('(')[1].rstrip(')'))
+    else:
+        forecast_days = st.number_input("手动输入预测天数", min_value=20, max_value=5000, value=252, step=10)
 
 with st.sidebar.expander("🏛️ 四张网参数", expanded=False):
     bond_yield = st.number_input("10年期国债收益率（%）", min_value=0.0, max_value=10.0, value=2.5, step=0.1)
@@ -207,6 +209,51 @@ with st.sidebar.expander("🔄 板块轮动参数", expanded=False):
     if flow3_sector == "（手动输入）":
         flow3_sector = st.text_input("手动输入", placeholder="如：国防军工", key="f3m")
     flow3_amount = st.number_input("净流入第3名（亿元）", min_value=0.0, value=0.0, step=1.0, key="f3a")
+
+# ---- 概念板块参数（新增） ----
+with st.sidebar.expander("🧩 概念板块参数", expanded=False):
+    st.caption("选择概念板块，查看成分股和热度")
+    
+    # 获取概念列表（尝试多个数据源）
+    concept_list = []
+    try:
+        # 尝试从 akshare 获取
+        import akshare as ak
+        concept_df = ak.stock_board_concept_name_em()
+        if concept_df is not None and not concept_df.empty:
+            concept_list = concept_df['板块名称'].tolist()
+    except:
+        pass
+    
+    # 如果 akshare 失败，尝试从 zzshare 获取
+    if not concept_list:
+        try:
+            api_temp = DataApi()
+            plates_df = api_temp.plates_list()
+            if plates_df is not None and not plates_df.empty:
+                if '类型' in plates_df.columns:
+                    concept_list = plates_df[plates_df['类型'] == '概念']['名称'].tolist()
+                elif 'plate_type' in plates_df.columns:
+                    concept_list = plates_df[plates_df['plate_type'] == '概念']['name'].tolist()
+                else:
+                    concept_list = plates_df['名称'].tolist() if '名称' in plates_df.columns else []
+        except:
+            pass
+    
+    # 如果都失败，使用默认热门概念列表
+    if not concept_list:
+        concept_list = ["人工智能", "芯片概念", "新能源", "机器人概念", "AIGC概念", 
+                       "华为概念", "储能", "光伏概念", "锂电池", "信创",
+                       "低空经济", "AI应用", "量子通信", "脑机接口", "数据要素"]
+    
+    selected_concept = st.selectbox(
+        "选择概念板块",
+        options=["（手动输入）"] + concept_list,
+        index=0,
+        key="concept_select"
+    )
+    if selected_concept == "（手动输入）":
+        selected_concept = st.text_input("手动输入概念名称", placeholder="如：低空经济", key="concept_manual")
 
 st.sidebar.divider()
 st.sidebar.subheader("☑️ 综合分析勾选")
@@ -404,7 +451,7 @@ def calc_sector_rotation(stock_sector, top1, top1_ch, top2, top2_ch, top3, top3_
     return result
 
 # =========================================================
-# 统计模拟函数（三种方法，参数化，独立获取数据）
+# 统计模拟函数
 # =========================================================
 @st.cache_data(ttl=3600)
 def run_simulations_for_code(code, hist_len, forecast_days, n_sim=5000):
@@ -456,7 +503,7 @@ def run_simulations_for_code(code, hist_len, forecast_days, n_sim=5000):
     return final_simple, final_block, final_gbm, last_price, df
 
 # =========================================================
-# 统计模拟显示函数（整体折叠，默认展开）
+# 统计模拟显示函数
 # =========================================================
 def display_statistical_simulation(code, hist_len, forecast_days, n_sim):
     """显示统计模拟结果（整体可折叠，默认展开）"""
@@ -573,6 +620,46 @@ def display_statistical_simulation(code, hist_len, forecast_days, n_sim):
         st.info("⭐ 推荐以 **块状抽样** 结果为核心参考，因为它保留了真实的时间序列特征，最接近实际交易环境。")
 
         return stats_block
+
+# =========================================================
+# 概念板块分析函数
+# =========================================================
+def display_concept_analysis(concept_name):
+    """显示概念板块分析结果"""
+    st.subheader(f"🧩 概念板块分析：{concept_name}")
+    
+    if not concept_name or concept_name == "（手动输入）":
+        st.info("💡 请先在侧边栏选择一个概念板块，或输入概念名称后点击分析")
+        return
+    
+    with st.spinner(f"正在获取 {concept_name} 的成分股数据..."):
+        try:
+            import akshare as ak
+            # 获取概念成分股
+            cons_df = ak.stock_board_concept_cons_em(symbol=concept_name)
+            
+            if cons_df is None or cons_df.empty:
+                st.warning(f"未获取到 {concept_name} 的成分股数据，请检查概念名称是否正确")
+                st.info("💡 提示：可尝试在侧边栏手动输入其他概念名称，如「低空经济」「AI应用」等")
+                return
+            
+            st.write(f"**成分股数量：** {len(cons_df)} 只")
+            
+            # 显示成分股列表
+            st.dataframe(cons_df, use_container_width=True)
+            
+            # 获取前5只成分股的实时行情（简化版）
+            st.write("**🔥 热门成分股（前5只）**")
+            top_stocks = cons_df.head(5)
+            st.table(top_stocks[['名称', '代码']])
+            
+            st.caption(f"💡 数据来源：同花顺概念板块，共 {len(cons_df)} 只成分股")
+            
+        except ImportError:
+            st.error("❌ 需要安装 akshare 库：在命令行执行 pip install akshare")
+        except Exception as e:
+            st.error(f"❌ 获取概念数据失败：{e}")
+            st.info("💡 提示：概念板块接口可能因数据源变动暂时不可用，可尝试更换概念名称或稍后再试")
 
 # =========================================================
 # 显示函数（原有）
@@ -826,7 +913,8 @@ else:
         flow1_amount, flow2_amount, flow3_amount
     )
 
-    col1, col2, col3, col4, col5 = st.columns(5)
+    # 六个按钮
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     with col1:
         if st.button("📊 技术信号", use_container_width=True):
             st.session_state['active'] = 'tech'
@@ -840,6 +928,9 @@ else:
         if st.button("📈 统计模拟", use_container_width=True):
             st.session_state['active'] = 'simulation'
     with col5:
+        if st.button("🧩 概念板块", use_container_width=True):
+            st.session_state['active'] = 'concept'
+    with col6:
         if st.button("🎯 综合分析", use_container_width=True):
             st.session_state['active'] = 'comprehensive'
 
@@ -860,6 +951,8 @@ else:
             display_sector_rotation(sector_result)
         elif active == 'simulation':
             display_statistical_simulation(code, hist_days, forecast_days, n_simulations)
+        elif active == 'concept':
+            display_concept_analysis(selected_concept)
         elif active == 'comprehensive':
             try:
                 final_simple, final_block, final_gbm, current_price, df_hist = run_simulations_for_code(code, hist_days, forecast_days, n_simulations)
