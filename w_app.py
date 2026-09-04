@@ -8,13 +8,12 @@ import os
 import warnings
 warnings.filterwarnings('ignore')
 
-st.set_page_config(page_title="智能双底检测器", layout="wide")
+st.set_page_config(page_title="三合一量化指标", layout="wide")
 
 # =========================================================
 # 🔐 登录功能（兼容本地和云端）
 # =========================================================
 
-# 尝试从secrets读取密码，如果失败则使用明文（本地测试用）
 try:
     USERNAME = st.secrets["USERNAME"]
     PASSWORD = st.secrets["PASSWORD"]
@@ -34,7 +33,6 @@ def login_form():
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
             with st.form("login_form"):
-                # 输入框无预填值，只显示提示文字
                 username = st.text_input("用户名", placeholder="请输入用户名")
                 password = st.text_input("密码", placeholder="请输入密码", type="password")
                 submitted = st.form_submit_button("登录", use_container_width=True, type="primary")
@@ -60,9 +58,8 @@ if not auth["authenticated"]:
     st.stop()
 # =========================================================
 
-# 显示标题
-st.title("📈 智能W型双底检测器")
-st.caption("数据源：zzshare · 独立模块 + 侧边栏设置入口")
+st.title("📈 三合一量化指标")
+st.caption("数据源：zzshare · 技术信号 + 四张网 + 板块轮动 独立分析")
 
 # =========================================================
 # 数据持久化
