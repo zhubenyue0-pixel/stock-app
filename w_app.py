@@ -11,20 +11,20 @@ warnings.filterwarnings('ignore')
 st.set_page_config(page_title="智能双底检测器", layout="wide")
 
 # =========================================================
-# 🔐 登录功能（兼容本地和云端）
+# 🔐 登录功能（基于 session_state，解决自动填充和手机跳转）
 # =========================================================
 
-# 尝试从secrets读取密码，如果失败则使用明文（本地测试用）
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+if "username" not in st.session_state:
+    st.session_state.username = ""
+
 try:
     USERNAME = st.secrets["USERNAME"]
     PASSWORD = st.secrets["PASSWORD"]
 except:
     USERNAME = "15555101206"
     PASSWORD = "Liyuhang0608."
-
-@st.cache_resource
-def get_auth_state():
-    return {"authenticated": False, "username": ""}
 
 def login_form():
     st.empty()
@@ -34,32 +34,30 @@ def login_form():
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
             with st.form("login_form"):
-                username = st.text_input("用户名", placeholder="15555101206")
-                password = st.text_input("密码", placeholder="输入密码", type="password")
+                username = st.text_input("用户名", placeholder="请输入用户名", autocomplete="off")
+                password = st.text_input("密码", placeholder="请输入密码", type="password", autocomplete="off")
                 submitted = st.form_submit_button("登录", use_container_width=True, type="primary")
                 if submitted:
                     if username == USERNAME and password == PASSWORD:
-                        auth = get_auth_state()
-                        auth["authenticated"] = True
-                        auth["username"] = username
+                        st.session_state.authenticated = True
+                        st.session_state.username = username
                         st.success("登录成功！正在跳转...")
                         st.rerun()
                     else:
                         st.error("用户名或密码错误，请重试")
 
 def logout():
-    auth = get_auth_state()
-    auth["authenticated"] = False
-    auth["username"] = ""
+    st.session_state.authenticated = False
+    st.session_state.username = ""
     st.rerun()
 
-auth = get_auth_state()
-if not auth["authenticated"]:
+if not st.session_state.authenticated:
     login_form()
     st.stop()
-# =========================================================
 
-# 显示标题
+# =========================================================
+# 主界面
+# =========================================================
 st.title("📈 智能W型双底检测器")
 st.caption("数据源：zzshare · 独立模块 + 侧边栏设置入口")
 
@@ -114,7 +112,7 @@ if 'view' not in st.session_state:
 # 侧边栏
 # =========================================================
 st.sidebar.subheader("⚙️ 核心参数")
-st.sidebar.write(f"👤 已登录：{auth['username']}")
+st.sidebar.write(f"👤 已登录：{st.session_state.username}")
 if st.sidebar.button("🚪 退出登录", use_container_width=True):
     logout()
 st.sidebar.divider()
@@ -186,7 +184,7 @@ if st.session_state.view == "设置":
         st.rerun()
 
 # =========================================================
-# 核心函数
+# 核心函数（保持不变）
 # =========================================================
 def fetch_stock_data(code, days):
     api = DataApi()
